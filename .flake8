@@ -1,0 +1,7 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E203, W503, E402
+exclude = .git,__pycache__,.venv,airflow/logs,spark-warehouse
+per-file-ignores =
+    consumer/consumer_spark.py:E501
+    tests/*:E501

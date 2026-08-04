@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+airflow/logs/
+!airflow/logs/.gitkeep
+checkpoints/
+spark-warehouse/
+metastore_db/
+derby.log
+.DS_Store
+.idea/
+.vscode/
