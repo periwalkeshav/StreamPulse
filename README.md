@@ -96,3 +96,33 @@ make clean     # stop everything and delete the volumes
 
 **Requirements:** Docker Desktop with ~6 GB allocated. Nothing else — Java, Spark, Kafka and Python all live
 inside the images.
+
+---
+
+## Data model
+
+Full DDL in [`sql/schema.sql`](sql/schema.sql); the event contract is in
+[`schema_registry.md`](schema_registry.md).
+
+| Table | Grain | Written by | Conflict policy |
+|---|---|---|---|
+| `raw_events` | one row per event | `ingest` | `ON CONFLICT (event_id) DO NOTHING` |
+| `aggregated_metrics` | (window, event_type) | `windowed` | `DO UPDATE` — windows are revised as late data arrives |
+| `alerts` | (event_id, alert_type) | `ingest` | `DO UPDATE` |
+| `user_sessions` | (user_id, session_start) | `sessions` | `DO UPDATE` |
+| `dlq_events` | (source_partition, source_offset) | `ingest` | `DO NOTHING` — the Kafka coordinate is the natural key |
+| `baseline_stats` | event_type | `ingest` | `DO UPDATE` with **additive** merge |
+| `batch_log` | (query_name, batch_id) | all three | `DO UPDATE` |
+| `data_quality_results` | — | Airflow | — |
+| `analytics.*` | see [dbt](#analytics-layer-dbt) | dbt | rebuilt / `delete+insert` |
+
+**Why upserts instead of `df.write.jdbc()`.** Spark's JDBC writer only appends or overwrites. Kafka gives
+at-least-once delivery, and a micro-batch that fails after writing but before committing its offsets *will*
+be replayed. Appending would duplicate those rows. Every sink in [`consumer/sinks.py`](consumer/sinks.py)
+therefore uses `INSERT … ON CONFLICT` through `execute_values`, executed with `foreachPartition` so each
+executor writes its own partition in one batched round trip. At-least-once delivery plus idempotent storage
+gives **effectively-once** results, which is what actually matters — and it is far cheaper than Kafka
+transactions.
+
+The `uniqueness` check in the data quality DAG exists specifically to prove this: after 1.9 M events and a
+full load-test replay, **0 duplicate `event_id`s**.
