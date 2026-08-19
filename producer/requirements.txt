@@ -1,0 +1,6 @@
+kafka-python==2.0.2
+lz4==4.3.3
+Faker==25.9.1
+psycopg2-binary==2.9.9
+locust==2.29.1
+pytest==8.2.2

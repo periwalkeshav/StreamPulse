@@ -99,6 +99,49 @@ inside the images.
 
 ---
 
+## What each piece does
+
+### Producer — [`producer/`](producer/)
+
+Generates a realistic e-commerce funnel (`page_view` → `add_to_cart` → `checkout_started` → `order_placed`),
+plus `payment_failed` and IoT `sensor_reading` events, at a configurable rate. It deliberately injects three
+kinds of trouble so the rest of the pipeline has something real to handle:
+
+| Injection | Default | Exercises |
+|---|---|---|
+| `MALFORMED_RATE` | 1 % | The dead letter queue (5 distinct corruption flavours) |
+| `ANOMALY_RATE` | 0.5 % | The 3σ anomaly detector (values 6–14σ out) |
+| `LATE_EVENT_RATE` | 1 % | Watermarking (events up to 10 minutes behind wall clock) |
+
+Throughput tuning is exposed as `KAFKA_BATCH_SIZE` / `KAFKA_LINGER_MS` / `KAFKA_COMPRESSION` — the three
+levers that trade latency for throughput on a Kafka producer.
+
+### Spark consumer — [`consumer/consumer_spark.py`](consumer/consumer_spark.py)
+
+Three streaming queries in one application:
+
+| Query | Output mode | Responsibility |
+|---|---|---|
+| `ingest` | update | Parse, validate, split valid/invalid, enrich, upsert `raw_events`, score anomalies, republish to `processed-events` / `alerts` / `dlq-events`, fold the batch into the rolling baseline |
+| `windowed` | update | 5-minute tumbling windows per event type → `aggregated_metrics` |
+| `sessions` | append | Session windows per user (inactivity gap) → `user_sessions` |
+
+All the DataFrame logic lives in [`consumer/transformations.py`](consumer/transformations.py) as **pure
+functions**, which is what makes [`tests/test_transformations.py`](tests/test_transformations.py) possible:
+the tests run the identical Catalyst plans against static DataFrames, no broker required.
+
+### DLQ monitor — [`consumer/dlq_monitor.py`](consumer/dlq_monitor.py)
+
+Consumes `dlq-events`, logs a breakdown by error type every 60 s, and persists a snapshot to `dlq_stats` so
+Grafana can alert on it:
+
+```
+ERROR streampulse.dlq_monitor | dlq volume: 565 message(s) in the last 60s (759 since start)
+      | MALFORMED_JSON=228, INVALID_TIMESTAMP=131, UNKNOWN_EVENT_TYPE=107, MISSING_EVENT_ID=99
+```
+
+---
+
 ## Data model
 
 Full DDL in [`sql/schema.sql`](sql/schema.sql); the event contract is in
